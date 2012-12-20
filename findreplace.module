@@ -1,0 +1,458 @@
+<?php
+
+// $Id$
+
+/**
+ *@file
+ * Performs a basic find and replace across content
+ * 
+ * Multi-step form techniques borrowed mostly from Examples module
+ * 
+ */
+
+/**
+ * Implements hook_init()
+ */
+function findreplace_init() {
+
+  // Grab the maximum number of replacements allowed from a variable, or set default
+  $max = variable_get('findreplace_max', 100);
+
+  // Save the max as a variable
+  variable_set('findreplace_max', $max);
+}
+
+/**
+ * Implements hook_menu().
+ */
+function findreplace_menu() {
+  $items['admin/config/content/findreplace'] = array(
+    'title' => 'Find and Replace',
+    'description' => 'Provides basic find and replace functionality using a form.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findreplace_page'),
+    'access arguments' => array('access findreplace'),
+  );
+
+  $items['admin/config/content/findreplace/settings'] = array(
+    'title' => 'Find and replace settings',
+    'description' => 'find and replace configuration',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findreplace_admin_settings'),
+    'access arguments' => array('administer findreplace'),
+    'file' => 'findreplace.admin.inc',
+    'file path' => drupal_get_path('module', 'findreplace'),
+  );
+  
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function findreplace_permission() {
+  return array(
+    'administer findreplace' => array(
+      'title' => t('Administer Find and Replace module'),
+      'description' => t('Perform administration tasks for Find and Replace module.'),
+    ),
+    'access findreplace' => array(
+      'title' => t('Access Find and Replace'),
+      'description' => t('Perform Find and Replace operations.'),
+    ),
+  );
+}
+
+
+/**
+ * Returns the list of steps and their associated forms. This has been separated
+ * to clarify and easy the understanding of this example. You should edit this
+ * function to include the steps your wizard/multistep form requires.
+ *
+ * @return $array
+ *
+ */
+function findreplace_steps() {
+  return array(
+      1 => array(
+        'form' => 'findreplace_mainform',
+      ),
+      2 => array(
+        'form' => 'findreplace_confirm',
+      ),
+    );
+}
+
+/**
+ * Main form-building page
+ */
+function findreplace_page($form, &$form_state) {
+//  $print = '<pre>' . print_r($form_state, TRUE) . '</pre>';
+//  drupal_set_message($print);
+
+  
+  
+  // Initialize a description of the steps for the wizard.
+  if (empty($form_state['step'])) {
+    $form_state['step'] = 1;
+
+    // This array contains the function to be called at each step to get the
+    // relevant form elements. It will also store state information for each
+    // step.
+    $form_state['step_information'] = findreplace_steps();
+  }
+  $step = &$form_state['step'];
+  //drupal_set_title(t('Extensible Wizard: Step @step', array('@step' => $step)));
+
+  // Call the function named in $form_state['step_information'] to get the
+  // form elements to display for this step.
+  $form = $form_state['step_information'][$step]['form']($form, $form_state);
+
+  // Show the 'previous' button if appropriate. Note that #submit is set to
+  // a special submit handler, and that we use #limit_validation_errors to
+  // skip all complaints about validation when using the back button. The
+  // values entered will be discarded, but they will not be validated, which
+  // would be annoying in a "back" button.
+  if ($step > 1) {
+    $form['findreplace-prev'] = array(
+      '#type' => 'submit',
+      '#value' => t('Go back'),
+      '#name' => 'prev',
+      '#submit' => array('findreplace_previous_submit'),
+      '#limit_validation_errors' => array(),
+    );
+  }
+
+  // Show the Next button only if there are more steps defined.
+  if ($step < count($form_state['step_information'])) {
+    // The Next button should be included on every step
+    $form['next'] = array(
+      '#type' => 'submit',
+      '#value' => t('Next'),
+      '#name' => 'next',
+      '#submit' => array('findreplace_next_submit'),
+    );
+  }
+  else {
+    // Just in case there are no more steps, we use the default submit handler
+    // of the form wizard. Call this button Finish, Submit, or whatever you
+    // want to show. When this button is clicked, the
+    // form_example_wizard_submit handler will be called.
+    
+    //Don't offer the submit button unless we're on the appropriate step,
+    //the original request was for a replacement (not search only),
+    //and there were search results
+    if (($step == 2) && 
+        ($form_state['step_information'][1]['stored_values']['replacement'] == TRUE) &&
+        ($form_state['step_information'][1]['stored_values']['no_results'] == FALSE)
+       ) {
+      $form['findreplace-finish'] = array(
+        '#type' => 'submit',
+        '#value' => t('Do it!'),
+      );
+    }
+  }
+
+  // Include each validation function defined for the different steps.
+  if (function_exists($form_state['step_information'][$step]['form'] . '_validate')) {
+    $form['next']['#validate'] = array($form_state['step_information'][$step]['form'] . '_validate');
+  }
+
+  return $form;
+}
+
+/**
+ * Main find/replace form
+ * Some of these options are wishful thinking
+ */
+function findreplace_mainform($form, &$form_state) {
+  
+  //TODO: how to replace with blanks?
+  
+  $form = array();
+  $form['string_to_find'] = array(
+    '#title' => t('Text string to find'),
+    '#type' => 'textfield',
+    '#required' => TRUE,
+    //'#description' => t('You want this replaced'),
+  );
+  $form['replacement'] = array(
+    '#title' => t('Perform replacement (uncheck to just search)'),
+    '#type' => 'checkbox',
+    '#default_value' => TRUE,
+  );
+  $form['replace_options'] = array(
+    '#title' => 'Replacement options',
+    '#type' => 'fieldset',
+    '#states' => array(
+      'visible' => array(
+        ':input[name="replacement"]' => array('checked' => TRUE),
+      ),
+    ),
+  );
+  $form['replace_options']['replace_with'] = array(
+    '#title' => t('Replace with'),
+    '#type' => 'textfield',
+    '#description' => t('Enter [BLANK] to replace with empty text, equivalent of "". Be especially
+      careful of these replacements! There is no way to reverse them!!'),
+  );
+  $form['replace_options']['regex'] = array(
+    '#title' => t('Regex replace?'),
+    '#type' => 'radios',
+    '#options' => array('no' => t('No (performs a basic string replace)'), 'yes' => t('Yes')),
+    '#default_value' => 'no',
+  );
+  $form['replace_options']['regex_options'] = array(
+    '#title' => 'Regular expression options',
+    '#type' => 'fieldset',
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+    '#states' => array(
+      'visible' => array(
+        ':input[name="regex"]' => array('value' => 'yes'),
+      ),
+    ),
+  );
+  $form['replace_options']['regex_options']['options'] = array(
+    '#title' => t('Pattern modifiers'),
+    '#type' => 'checkboxes',
+    '#options' => drupal_map_assoc(array(t('i'), t('m'), t('s'), t('x'))),
+  );
+  $form['replace_options']['regex_options']['options']['i'] = array(
+    '#default_value' => TRUE,
+  );
+  $form['replace_options']['verbose_results'] = array(
+    '#title' => t('Display full node text after replacements'),
+    '#type' => 'checkbox',
+    '#default_value' => FALSE,
+  );
+  //used to track whether the search produced no results
+  $form['no_results'] = array (
+    '#type' => 'hidden',
+    '#value' => TRUE,
+  );
+  
+  //No submit needed - handled by overarching form structure
+ 
+  return $form;
+}
+
+/**
+ * Validation for findreplace_form().
+ */
+function findreplace_mainform_validate($form, &$form_state) {
+  
+  //Check for blanks
+  if (($form_state['values']['replacement'] == TRUE) &&
+      (($form_state['values']['replace_with'] == '') || 
+       ($form_state['values']['replace_with'] == '""') || 
+       ($form_state['values']['replace_with'] == "''"))) {
+    form_set_error('replace_with', 'Enter [BLANK] to confirm you want to replace this string with nothing.');
+  } 
+}
+
+/**
+ * Submit handler for the "previous" button.
+ * - Stores away $form_state['values']
+ * - Decrements the step counter
+ * - Replaces $form_state['values'] with the values from the previous state.
+ * - Forces form rebuild.
+ *
+ */
+function findreplace_previous_submit($form, &$form_state) {
+  $current_step = &$form_state['step'];
+  $form_state['step_information'][$current_step]['stored_values'] = $form_state['values'];
+  if ($current_step > 1) {
+    $current_step--;
+    $form_state['values'] = $form_state['step_information'][$current_step]['stored_values'];
+  }
+  $form_state['rebuild'] = TRUE;
+}
+
+/**
+ * Submit handler for the 'next' button.
+ * - Saves away $form_state['values']
+ * - Increments the step count.
+ * - Replace $form_state['values'] from the last time we were at this page
+ *   or with array() if we haven't been here before.
+ * - Force form rebuild.
+ *
+ * @param $form
+ * @param $form_state
+ */
+function findreplace_next_submit($form, &$form_state) {
+  //Initial form submitted, now we want to get confirmation, done at next step
+//    drupal_set_message(t("IN NEXT SUBMIT still knows we want to replace '@find' with '@replace'.", 
+//        array('@find' => $form_state['values']['string_to_find'], '@replace' => $form_state['values']['replace_with'])));
+    
+  $current_step = &$form_state['step'];
+  $form_state['step_information'][$current_step]['stored_values'] = $form_state['values'];
+
+  if ($current_step < count($form_state['step_information'])) {
+    $current_step++;
+    if (!empty($form_state['step_information'][$current_step]['stored_values'])) {
+      $form_state['values'] = $form_state['step_information'][$current_step]['stored_values'];
+    }
+    else {
+      $form_state['values'] = array();
+    }
+    $form_state['rebuild'] = TRUE;  // Force rebuild with next step.
+    return;
+  }
+}
+
+/**
+ * Build a confirm form and do preliminary check of database.
+ * Get user OK before performing permanent updates. 
+ */
+function findreplace_confirm($form, &$form_state) {
+  
+//  $print = '<pre>' . print_r($form, TRUE) . '</pre>';
+//  drupal_set_message($print);
+//  drupal_set_message(t("IN FINDREPLACE CONFIRM '@find' and '@replace' stored in new field.", 
+//      array('@find' => $form_state['step_information'][1]['stored_values']['string_to_find'], '@replace' => $form_state['step_information'][1]['stored_values']['replace_with'])));
+  
+  //This query just pulls titles of matches for count & approval
+  $query = db_select('field_data_body', 'fdb');    
+  $query->join('node','n','n.nid = fdb.entity_id');
+  $query->fields('n', array('title', 'nid'))
+  //->fields('fdb', array('entity_id','body_value'))
+  ->orderBy('title', 'ASC')
+  ->condition('fdb.body_value', '%'.db_like($form_state['step_information'][1]['stored_values']['string_to_find']).'%', 'LIKE')
+  ->addTag('node access');
+
+  $dire_warning = '';
+  $max = variable_get('findreplace_max', 0);  //if the variable is not available for some reason, do not permit updates
+  $form = array();
+  $prelim_list = array();
+  $result = $query->execute();
+
+  foreach ($result as $row) {
+    $prelim_list[] = l($row->title, "node/" . $row->nid, array('attributes' => array('target' => '_blank')));    
+  } 
+    
+  $form_state['step_information'][1]['stored_values']['no_results'] = (count($prelim_list) === 0) ? TRUE : FALSE;
+    
+  //Only provide replacement options if user asked for them and there were any search results
+  if (($form_state['step_information'][1]['stored_values']['replacement'] == TRUE) && (count($prelim_list) !== 0)) {
+    drupal_set_title(t('Are you sure you want to perform this find/replace?'));
+    $dire_warning .= '<p>' . count($prelim_list). t(' entries will be altered.') . '</p>';
+    $dire_warning .= '<p>' . theme('item_list', array('items' => $prelim_list)) . '</p>';
+    $dire_warning .= '<p>' . t('Confirming will make ACTUAL CHANGES to your database. Be sure you\'ve got a 
+      backup copy.') . '</p>';
+    if ($max < count($prelim_list)) {
+      $dire_warning .= '<p><strong>' . t('Number of matching entries exceeds maximum allowed by module settings. ') . '</strong>';
+      $dire_warning .= t('Only '). $max . t(' entries will be updated.') . '</p>';
+      //Update query will be limited to the max number
+    }
+  }
+  else {
+    drupal_set_title(t('Search results'));
+    $dire_warning .= '<p>' . count($prelim_list). t(' entries found.') . '</p>';
+    $dire_warning .= '<p>' . theme('item_list', array('items' => $prelim_list)) . '</p>';
+  }
+
+  $form['confirmation'] = array(
+      '#type' => 'markup',
+      '#markup' => $dire_warning,
+  );
+  return $form;
+  
+}
+
+// And now comes the magic of the wizard, the function that should handle all the
+// inputs from the user on each different step.
+/**
+ * Wizard form submit handler.
+ * - Saves away $form_state['values']
+ * - Process all the form values.
+ *
+ * This demonstration handler just do a drupal_set_message() with the information
+ * collected on each different step of the wizard.
+ *
+ * @param $form
+ * @param $form_state
+ *
+ * @ingroup form_example
+ */
+function findreplace_page_submit($form, &$form_state) {
+  
+//  drupal_set_message(t("'@find' for '@replace'...", 
+//    array('@find' => $form_state['step_information'][1]['stored_values']['string_to_find'], '@replace' => $form_state['step_information'][1]['stored_values']['replace_with'])));
+
+  //Prepare update query
+  $query = db_select('field_data_body', 'fdb');    
+  $query->join('node','n','n.nid = fdb.entity_id');
+  $query->fields('n', array('title'))
+  ->fields('fdb', array('entity_id'))
+  ->condition('fdb.body_value', '%'.db_like($form_state['step_information'][1]['stored_values']['string_to_find']).'%', 'LIKE')
+  ->range(0, variable_get('findreplace_max', 0))
+  ->addTag('node access');
+
+  //Search term
+  $find_term = $form_state['step_information'][1]['stored_values']['string_to_find'];
+  
+  if ($form_state['step_information'][1]['stored_values']['regex'] == "yes") {
+    $find_term = '/' . $find_term . '/';
+    //append regex pattern modifiers
+    if ($form_state['step_information'][1]['stored_values']['options']['i']) {
+      $find_term .= 'i';
+    }
+    if ($form_state['step_information'][1]['stored_values']['options']['m']) {
+      $find_term .= 'm';
+    }
+    if ($form_state['step_information'][1]['stored_values']['options']['s']) {
+      $find_term .= 's';
+    }
+    if ($form_state['step_information'][1]['stored_values']['options']['x']) {
+      $find_term .= 'x';
+    }
+  }
+  
+  //Replace term
+  $replace_with = $form_state['step_information'][1]['stored_values']['replace_with'];
+  
+  if ($replace_with === '[BLANK]') {
+    $replace_with = '';
+  }
+    
+  $result = $query->execute();
+  foreach ($result as $row) {
+    
+    $n = node_load($row->entity_id);
+
+    //Check and perform string or regex replacement
+    if ($form_state['step_information'][1]['stored_values']['regex'] == "yes") {
+      $n->body['und'][0]['value'] = preg_replace($find_term, $replace_with, $n->body['und'][0]['value']);
+    }
+    else { //string replace
+      $n->body['und'][0]['value'] = str_replace($find_term, $replace_with, $n->body['und'][0]['value']);
+    }   
+    
+    //any error checking needed?
+    node_save($n); 
+    drupal_set_message("Updated: $row->entity_id, $row->title.");
+    if ($form_state['step_information'][1]['stored_values']['verbose_results']) {
+      drupal_set_message('New body is:<br/>' . $n->body['und'][0]['value']);
+    }          
+  }
+    
+  $current_step = &$form_state['step'];
+  $form_state['step_information'][$current_step]['stored_values'] = $form_state['values'];
+
+  // In this case we've completed the final page of the wizard, so process the
+  // submitted information.
+  // drupal_set_message(t('This information was collected by this wizard:'));
+//  foreach ($form_state['step_information'] as $index => $value) {
+//    // Remove FAPI fields included in the values (form_token, form_id and form_build_id
+//    // This is not required, you may access the values using $value['stored_values']
+//    // but I'm removing them to make a more clear representation of the collected
+//    // information as the complete array will be passed through drupal_set_message().
+//    unset($value['stored_values']['form_id']);
+//    unset($value['stored_values']['form_build_id']);
+//    unset($value['stored_values']['form_token']);
+//
+//    // Now show all the values.
+//    drupal_set_message(t('Step @num collected the following values: <pre>@result</pre>', array('@num' => $index, '@result' => print_r($value['stored_values'], TRUE))));
+//  }
+}
