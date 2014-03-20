@@ -4,7 +4,9 @@
 unreliable in performance or even stability, so this is a basic version that does what I needed.</p>
 
 <p><strong><em>Still very much in beta. Use with caution: back up your database prior to 
-installing, or for galaxy&#8217;s sake, running an actual find-and-replace.</em></strong></p>
+installing, or for galaxy&#8217;s sake, running an actual find-and-replace.</em> This module works
+for me but I haven't tested it thoroughly. It's a bit of a performance hit as written--looking
+to give it some more attention soon.</strong></p>
 
 <p>Searches only node bodies at present. Working on admin options for content types &amp; fields.</p>
 
