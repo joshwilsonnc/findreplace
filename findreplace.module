@@ -14,6 +14,11 @@
  * **error handling http://drupal.org/node/672504
  * **body['und'][0]['value'] consistent? I think you can ignore language?
  * 
+ * *Add support and admin options for find/replacing over user-specified content types 
+ * and fields
+ * *Additional regex testing
+ * *documentation and improved integration of fulltext search
+ * 
  */
 
 /**
