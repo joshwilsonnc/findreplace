@@ -164,7 +164,7 @@ function findreplace_mainform($form, &$form_state) {
     '#title' => t('Text string to find'),
     '#type' => 'textfield',
     '#required' => TRUE,
-    //'#description' => t('You want this replaced'),
+    '#description' => t('This is an exact string search, case-sensitive. To modify this, use the regex options.'),
   );
   $form['replacement'] = array(
     '#title' => t('Perform replacement (uncheck to just search)'),
@@ -297,25 +297,34 @@ function findreplace_next_submit($form, &$form_state) {
  */
 function findreplace_confirm($form, &$form_state) {
   
-//  $print = '<pre>' . print_r($form, TRUE) . '</pre>';
-//  drupal_set_message($print);
-//  drupal_set_message(t("IN FINDREPLACE CONFIRM '@find' and '@replace' stored in new field.", 
-//      array('@find' => $form_state['step_information'][1]['stored_values']['string_to_find'], '@replace' => $form_state['step_information'][1]['stored_values']['replace_with'])));
-  
-  //This query just pulls titles of matches for count & approval
-  $query = db_select('field_data_body', 'fdb');    
-  $query->join('node','n','n.nid = fdb.entity_id');
-  $query->fields('n', array('title', 'nid'))
-  //->fields('fdb', array('entity_id','body_value'))
-  ->orderBy('title', 'ASC')
-  ->condition('fdb.body_value', '%'.db_like($form_state['step_information'][1]['stored_values']['string_to_find']).'%', 'LIKE')
-  ->addTag('node access');
-
-  $dire_warning = '';
+  //Pull titles of matches for count & approval 
+  $term = $form_state['step_information'][1]['stored_values']['string_to_find'];
+  $search_style = variable_get('findreplace_search_style', 'default');
   $max = variable_get('findreplace_max', 0);  //if the variable is not available for some reason, do not permit updates
   $form = array();
   $prelim_list = array();
-  $result = $query->execute();
+  $dire_warning = '';
+  
+  switch ($search_style) {
+    case "fulltext":
+      //THIS VERSION uses a full-text indexed table
+      //Much faster than above! But requires a pre-built table with FULLTEXT indexing
+      //Still not as efficient as an external search (e.g., Solr)
+      $result = db_query('SELECT node.title AS title, node.nid AS nid
+        FROM ncpedia_linkrecs_helper INNER JOIN node ON node.nid = ncpedia_linkrecs_helper.entity_id 
+        WHERE MATCH (ncpedia_linkrecs_helper.body_value) 
+        AGAINST (:search IN BOOLEAN MODE) ORDER BY title ASC',
+              array(':search' => '+"'.$term.'"'));
+      break;
+    default:
+      //THIS VERSION uses Drupal's default field_data_body table
+      //Not very efficient, doesn't scale. Does a full table scan. But, requires
+      //no additional tables or indexing.
+      $result = db_query("SELECT n.title AS title, n.nid AS nid
+        FROM {field_data_body} fdb INNER JOIN {node} n ON n.nid = fdb.entity_id 
+        WHERE (fdb.body_value LIKE :search) ORDER BY title ASC",
+              array(':search' => "%".$term."%")); 
+  }
 
   foreach ($result as $row) {
     $prelim_list[] = l($row->title, "node/" . $row->nid, array('attributes' => array('target' => '_blank')));    
@@ -365,15 +374,6 @@ function findreplace_confirm($form, &$form_state) {
  */
 function findreplace_page_submit($form, &$form_state) {
   
-  //Prepare update query
-  $query = db_select('field_data_body', 'fdb');    
-  $query->join('node','n','n.nid = fdb.entity_id');
-  $query->fields('n', array('title'))
-  ->fields('fdb', array('entity_id'))
-  ->condition('fdb.body_value', '%'.db_like($form_state['step_information'][1]['stored_values']['string_to_find']).'%', 'LIKE')
-  ->range(0, variable_get('findreplace_max', 0))
-  ->addTag('node access');
-
   //Search term
   $find_term = $form_state['step_information'][1]['stored_values']['string_to_find'];
   
@@ -400,11 +400,35 @@ function findreplace_page_submit($form, &$form_state) {
   if ($replace_with === '[BLANK]') {
     $replace_with = '';
   }
-    
-  $result = $query->execute();
+  
+  //Update query  
+  $term = $form_state['step_information'][1]['stored_values']['string_to_find'];
+  $search_style = variable_get('findreplace_search_style', 'default');
+  $max = variable_get('findreplace_max', 1);
+  switch ($search_style) {
+    case "fulltext":
+      //THIS VERSION uses a full-text indexed table
+      //Much faster than above! But requires a pre-built table with FULLTEXT indexing
+      //Still not as efficient as an external search (e.g., Solr)
+      $result = db_query_range('SELECT node.title AS title, node.nid AS nid
+        FROM ncpedia_linkrecs_helper INNER JOIN node ON node.nid = ncpedia_linkrecs_helper.entity_id 
+        WHERE MATCH (ncpedia_linkrecs_helper.body_value) 
+        AGAINST (:search IN BOOLEAN MODE) ORDER BY title ASC', 0, $max,
+              array(':search' => '+"'.$term.'"'));
+      break;
+    default:
+      //THIS VERSION uses Drupal's default field_data_body table
+      //Not very efficient, doesn't scale. Does a full table scan. But, requires
+      //no additional tables or indexing.
+      $result = db_query_range("SELECT n.title AS title, n.nid AS nid
+        FROM {field_data_body} fdb INNER JOIN {node} n ON n.nid = fdb.entity_id 
+        WHERE (fdb.body_value LIKE :search) ORDER BY title ASC", 0, $max,
+              array(':search' => "%".$term."%")); 
+  }
+
   foreach ($result as $row) {
     
-    $n = node_load($row->entity_id);
+    $n = node_load($row->nid);
 
     //Check and perform string or regex replacement
     if ($form_state['step_information'][1]['stored_values']['regex'] == "yes") {
@@ -416,7 +440,7 @@ function findreplace_page_submit($form, &$form_state) {
     
     //any error checking needed?
     node_save($n); 
-    drupal_set_message("Updated: $row->entity_id, $row->title.");
+    drupal_set_message("Updated: $row->nid, $row->title.");
     if ($form_state['step_information'][1]['stored_values']['verbose_results']) {
       drupal_set_message('New body is:<br/>' . $n->body['und'][0]['value']);
     }          
