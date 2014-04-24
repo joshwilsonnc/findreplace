@@ -8,19 +8,13 @@
  * 
  * Multi-step form techniques borrowed mostly from Examples module
  * 
+ * GENERAL TODOs
+ * *********comments/documentation
+ * *********testing
+ * **error handling http://drupal.org/node/672504
+ * **body['und'][0]['value'] consistent? I think you can ignore language?
+ * 
  */
-
-/**
- * Implements hook_init()
- */
-function findreplace_init() {
-
-  // Grab the maximum number of replacements allowed from a variable, or set default
-  $max = variable_get('findreplace_max', 100);
-
-  // Save the max as a variable
-  variable_set('findreplace_max', $max);
-}
 
 /**
  * Implements hook_menu().
@@ -87,10 +81,6 @@ function findreplace_steps() {
  * Main form-building page
  */
 function findreplace_page($form, &$form_state) {
-//  $print = '<pre>' . print_r($form_state, TRUE) . '</pre>';
-//  drupal_set_message($print);
-
-  
   
   // Initialize a description of the steps for the wizard.
   if (empty($form_state['step'])) {
@@ -360,8 +350,6 @@ function findreplace_confirm($form, &$form_state) {
   
 }
 
-// And now comes the magic of the wizard, the function that should handle all the
-// inputs from the user on each different step.
 /**
  * Wizard form submit handler.
  * - Saves away $form_state['values']
@@ -377,9 +365,6 @@ function findreplace_confirm($form, &$form_state) {
  */
 function findreplace_page_submit($form, &$form_state) {
   
-//  drupal_set_message(t("'@find' for '@replace'...", 
-//    array('@find' => $form_state['step_information'][1]['stored_values']['string_to_find'], '@replace' => $form_state['step_information'][1]['stored_values']['replace_with'])));
-
   //Prepare update query
   $query = db_select('field_data_body', 'fdb');    
   $query->join('node','n','n.nid = fdb.entity_id');
@@ -440,19 +425,4 @@ function findreplace_page_submit($form, &$form_state) {
   $current_step = &$form_state['step'];
   $form_state['step_information'][$current_step]['stored_values'] = $form_state['values'];
 
-  // In this case we've completed the final page of the wizard, so process the
-  // submitted information.
-  // drupal_set_message(t('This information was collected by this wizard:'));
-//  foreach ($form_state['step_information'] as $index => $value) {
-//    // Remove FAPI fields included in the values (form_token, form_id and form_build_id
-//    // This is not required, you may access the values using $value['stored_values']
-//    // but I'm removing them to make a more clear representation of the collected
-//    // information as the complete array will be passed through drupal_set_message().
-//    unset($value['stored_values']['form_id']);
-//    unset($value['stored_values']['form_build_id']);
-//    unset($value['stored_values']['form_token']);
-//
-//    // Now show all the values.
-//    drupal_set_message(t('Step @num collected the following values: <pre>@result</pre>', array('@num' => $index, '@result' => print_r($value['stored_values'], TRUE))));
-//  }
 }
