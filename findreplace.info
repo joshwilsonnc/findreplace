@@ -1,5 +1,0 @@
-; $Id$
-name = Basic Find and Replace
-description = Performs a basic find and replace across content
-core = 7.x
-package = Zoo
